@@ -1716,7 +1716,128 @@ NetworkInterface::Map NetworkInterface::map(bool ipOnly, bool upOnly)
 
 	return result;
 #else
-	throw Poco::NotImplementedException("Not implemented in Android");
+	//TUHIN ###########################
+
+	FastMutex::ScopedLock lock(_mutex);
+	Map result;
+	DatagramSocket socket;
+
+	const int len = 100 * sizeof(struct ifreq);    //space for 100 interface
+	char buffer[len];
+
+	struct ifconf ifc;
+	struct ifreq *ifr;
+
+	ifc.ifc_len = sizeof(buffer);
+	ifc.ifc_buf = buffer;
+
+	if (::ioctl(socket.impl()->sockfd(), SIOCGIFCONF, &ifc) < 0)
+	{
+		throw NetException("cannot get network adapter list");
+	}
+
+	ifr = ifc.ifc_req;
+	int nOfInf = ifc.ifc_len / sizeof(struct ifreq);
+	for(int i = 0; i < nOfInf; i++)
+	{
+		const struct ifreq* cif = &ifr[i];
+
+		int family = ifr->ifr_addr.sa_family;
+		int index = ifr->ifr_ifindex;
+		short flags = ifr->ifr_flags;
+
+		auto it = result.find(index);
+		if(it != result.end())
+			continue;
+
+		//AF_INET6 AFINET
+
+		std::string ifname(cif->ifr_name);
+		IPAddress pip(cif->ifr_addr);
+		IPAddress pbroadcast(cif->ifr_broadaddr); //TODO: calculate broadcast address
+		IPAddress pmask(cif->ifr_netmask);
+		MACAddress pmac; // TODO
+
+		NetworkInterface pinf(ifname, pip, pmask, pbroadcast, index, 0 /*&pmac*/);
+		
+		result.insert(Map::value_type(index, pinf));
+	}
+/*
+	int lastlen = 0;
+	
+	char* buf = 0;
+	try
+	{
+		struct ifconf ifc;
+		for (;;)
+		{
+			buf = new char[len];
+			ifc.ifc_len = len;
+			ifc.ifc_buf = buf;
+			if (::ioctl(socket.impl()->sockfd(), SIOCGIFCONF, &ifc) < 0)
+			{
+				if (errno != EINVAL || lastlen != 0)
+					throw NetException("cannot get network adapter list");
+			}
+			else
+			{
+				if (ifc.ifc_len == lastlen)
+					break;
+				lastlen = ifc.ifc_len;
+			}
+			len += 10*sizeof(struct ifreq);
+			delete [] buf;
+		}
+		for (const char* ptr = buf; ptr < buf + ifc.ifc_len;)
+		{
+			const struct ifreq* ifr = reinterpret_cast<const struct ifreq*>(ptr);
+#if defined(POCO_HAVE_SALEN)
+			len = ifr->ifr_addr.sa_len;
+			if (sizeof(struct sockaddr) > len) len = sizeof(struct sockaddr);
+#else
+			len = sizeof(struct sockaddr);
+#endif
+			IPAddress addr;
+			bool haveAddr = false;
+			int ifIndex(-1);
+			switch (ifr->ifr_addr.sa_family)
+			{
+#if defined(POCO_HAVE_IPv6)
+			case AF_INET6:
+				ifIndex = if_nametoindex(ifr->ifr_name);
+				if (len < sizeof(struct sockaddr_in6)) len = sizeof(struct sockaddr_in6);
+				addr = IPAddress(&reinterpret_cast<const struct sockaddr_in6*>(&ifr->ifr_addr)->sin6_addr, sizeof(struct in6_addr), ifIndex);
+				haveAddr = true;
+				break;
+#endif
+			case AF_INET:
+				if (len < sizeof(struct sockaddr_in)) len = sizeof(struct sockaddr_in);
+				addr = IPAddress(ifr->ifr_addr);
+				haveAddr = true;
+				break;
+			default:
+				break;
+			}
+			if (haveAddr)
+			{
+				std::string name(ifr->ifr_name);
+				result.push_back(NetworkInterface(name, name, name, addr, ifIndex));
+			}
+			len += sizeof(ifr->ifr_name);
+			ptr += len;
+		}
+	}
+	catch (...)
+	{
+		delete [] buf;
+		throw;
+	}
+	delete [] buf;
+
+	*/
+	return result;
+
+
 #endif
 }
 
